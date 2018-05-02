@@ -10,9 +10,10 @@ var encoder = require('./lib/encode_decode')
 
 var HEADER_SIZE = utils.getBlockSize('header')
 var METADATA_SIZE = utils.getBlockSize('metadata')
-var MAX_HEADER_SIZE = Math.max(utils.getBlockSize('indexBlock'), utils.getBlockSize('tileBlock'))
+var TILE_HEADER_SIZE = utils.getBlockSize('tileBlock')
 var INDEX_HEADER_SIZE = utils.getBlockSize('indexBlock')
-var TILE_DATA_OFFSET = defs.tileBlock.data.offset
+var MAX_HEADER_SIZE = Math.max(HEADER_SIZE, METADATA_SIZE, TILE_HEADER_SIZE, INDEX_HEADER_SIZE)
+// KM: what is 8??
 var MIN_FILE_SIZE = HEADER_SIZE + METADATA_SIZE + INDEX_HEADER_SIZE + 8
 
 var defaultHeader = {
