@@ -1,4 +1,3 @@
-var bitfield = require('sparse-bitfield')
 var uint64be = require('uint64be')
 var assert = require('assert')
 var mutexify = require('mutexify')
@@ -31,8 +30,11 @@ module.exports = MapTiles
 
 function MapTiles (storage) {
   if (!(this instanceof MapTiles)) return new MapTiles(storage)
-  this.storage = typeof storage === 'string' ? raf(storage) : storage
+  this.storage = raf(storage)
+  this.index = [] // lol memory on writes
   this.lock = mutexify()
+  this.openSpaceOffset = 0
+  this.maxDepth = 1
 }
 
 MapTiles.prototype.put = function (q, tile, cb) {
@@ -51,15 +53,45 @@ MapTiles.prototype.put = function (q, tile, cb) {
 }
 
 MapTiles.prototype.end = function (cb) {
-  // hey we are done writing for now, cool. Write the index
+  var self = this
+  // write the index header
+  var indexHeader = {
+    type: constants.INDEX_BLOCK,
+    entryLength: constants.ENTRY_LENGTH,
+    depth: self.maxDepth,
+    firstQuadkey: self.firstQuadkey
+  }
+  this.storage.write(this.openSpaceOffset, encoder.encodeBlock(indexHeader), ondone)
+
+  function ondone (err) {
+    if (err) return cb(err)
+    ;(function next (i) {
+      if (i >= self.index.length) return cb()
+      var item = self.index[i]
+      var offset = this.openSpaceOffset + INDEX_HEADER_SIZE + (item.indexPosition * constants.ENTRY_LENGTH)
+      this.storage.write(offset, item.offset, next)
+    })(0)
+  }
 }
 
 MapTiles.prototype._write = function (quadkey, tile, cb) {
-  // need a way to build the index and then write it?
   // first lets assume there is no index yet...
+  if (!this.firstQuadkey) this.firstQuadkey = quadkey
+  this.maxDepth = Math.max(this.maxDepth, utils.quadkeyToTile(quadkey)[2])
+  var tileHeader = {
+    type: constants.TILE_BLOCK,
+    length: tile.length
+  }
   var indexPosition = utils.getIndexPosition(quadkey)
   var offset = HEADER_SIZE + METADATA_SIZE + (indexPosition * constants.ENTRY_LENGTH)
-  this.storage.write(tile, indexPosition, cb)
+  this.index.push({indexPosition, offset})
+  var buf = encoder.encodeBlock(tileHeader)
+  this.storage.write(offset, buf, function (err) {
+    if (err) return cb(err)
+    var tileOffset = offset + TILE_HEADER_SIZE
+    this.openSpaceOffset = tileOffset + tile.length
+    this.storage.write(tileOffset, tile, cb)
+  })
 }
 
 MapTiles.prototype.createFile = function (file, offsetBytes, cb) {
@@ -200,7 +232,7 @@ MapTiles.prototype._readAndParseBlock = function (offset, length, cb) {
   self.storage.read(offset, length, function (err, buf) {
     if (err) return cb(err)
     try {
-      var parsed = encoder.parseBlock(buf)
+      var parsed = encoder.decodeBlock(buf)
     } catch (e) {
       return cb(e)
     }
