@@ -105,9 +105,11 @@ MapTiles.prototype._read = function (quadkey, callback) {
     if (!constants.INDEX_BLOCK.equals(block.type)) {
       return callback(new Error('Unexpected block type ' + block.type))
     }
+    // KM: why not just check if there's a parentOffset?
     if (quadkey.length <= block.firstQuadkey.length &&
       quadkey !== block.firstQuadkey) {
       if (block.parentOffset) {
+        // KM: this should be INDEX_HEADER_SIZE, cause we know it's an INDEX at this point
         return self._readAndParseBlock(block.parentOffset, MAX_HEADER_SIZE, onParseBlock)
       } else {
         return callback(new Error('NotFound'))
@@ -116,6 +118,7 @@ MapTiles.prototype._read = function (quadkey, callback) {
     self._readTileOffsetFromIndex(quadkey, block, offset, function (err, nextOffset) {
       if (err) return callback(err)
       if (!nextOffset) return callback(new Error('NotFound'))
+      // KM: this should be TILE_HEADER_SIZE, cause we know it's a TILE at this point
       self._readAndParseBlock(nextOffset, MAX_HEADER_SIZE, onParseBlock)
     })
   }
@@ -130,10 +133,12 @@ MapTiles.prototype._readTileOffsetFromIndex = function (quadkey, block, offset, 
   if (typeof indexPosition === 'undefined') {
     return callback(new Error('NotFound'))
   }
-  // This is the offset in the file of a 4 or 8 byte buffer in the index that
-  // contains the offset of the tile.
-  var tileOffsetOffset = offset + INDEX_HEADER_SIZE +
-    (indexPosition * block.entryLength)
+  // This is the offset that contains the offset of the tile.
+
+  // TODO: for sparse indexes, the index position should be hashed
+  // so as to not have a bunch of empty blocks
+
+  var tileOffsetOffset = offset + INDEX_HEADER_SIZE + (indexPosition * block.entryLength)
   this.storage.read(tileOffsetOffset, block.entryLength, function (err, buf) {
     if (err) return callback(err)
     var offset = (buf.length === 4)
