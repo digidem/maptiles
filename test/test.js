@@ -58,7 +58,7 @@ function check (t, quadkeys, cb) {
     mt.get({q}, function (err, tile) {
       t.error(err)
       var xyz = utils.quadkeyToTile(q).map(function (n) { return n.toString() })
-      console.log('reading', q, xyz)
+      console.log('checking', 'q=', q, 'xyz=', xyz)
       var buf = fs.readFileSync(path.join(__dirname, 'data', 'mini', xyz[2], xyz[1], xyz[0] + '.jpeg'))
       t.ok(buf.equals(tile))
       next(i + 1)
