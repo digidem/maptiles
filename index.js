@@ -1,3 +1,4 @@
+var bitfield = require('sparse-bitfield')
 var uint64be = require('uint64be')
 var assert = require('assert')
 var mutexify = require('mutexify')
@@ -34,7 +35,7 @@ function MapTiles (storage) {
   this.lock = mutexify()
 }
 
-MapTiles.prototype.put = function (q, tile, callback) {
+MapTiles.prototype.put = function (q, tile, cb) {
   var quadkey = q.quadkey
   if (!quadkey) {
     assert(typeof q.z === 'number')
@@ -45,15 +46,23 @@ MapTiles.prototype.put = function (q, tile, callback) {
   assert(Buffer.isBuffer(tile))
 
   this.lock(function (release) {
-    this._write(quadkey, tile, callback)
+    this._write(quadkey, tile, cb)
   })
 }
 
-MapTiles.prototype._write = function (quadkey, tile, callback) {
-  // TODO
+MapTiles.prototype.end = function (cb) {
+  // hey we are done writing for now, cool. Write the index
 }
 
-MapTiles.prototype.createFile = function (file, offsetBytes, callback) {
+MapTiles.prototype._write = function (quadkey, tile, cb) {
+  // need a way to build the index and then write it?
+  // first lets assume there is no index yet...
+  var indexPosition = utils.getIndexPosition(quadkey)
+  var offset = HEADER_SIZE + METADATA_SIZE + (indexPosition * constants.ENTRY_LENGTH)
+  this.storage.write(tile, indexPosition, cb)
+}
+
+MapTiles.prototype.createFile = function (file, offsetBytes, cb) {
   var header = Object.assign({}, defaultHeader, {
     offsetBytes: offsetBytes
   })
@@ -62,23 +71,23 @@ MapTiles.prototype.createFile = function (file, offsetBytes, callback) {
   headerBuf.copy(buf)
   constants.METADATA_BLOCK.copy(buf, defaultHeader.metadataOffset)
   constants.INDEX_BLOCK.copy(buf, defaultHeader.firstIndexOffset)
-  this.storage.write(0, buf, callback)
+  this.storage.write(0, buf, cb)
 }
 
-MapTiles.prototype._writeMetadata = function (metadata, callback) {
+MapTiles.prototype._writeMetadata = function (metadata, cb) {
   var self = this
   self._readHeader(function (err, header) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     self._readMetadata(function (err, existingMetadata) {
-      if (err) return callback(err)
+      if (err) return cb(err)
       var merged = Object.assign({}, defaultMetadata, existingMetadata, metadata)
       var buf = encoder.encodeBlock(merged)
-      self.storage.write(header.metadataOffset, buf, callback)
+      self.storage.write(header.metadataOffset, buf, cb)
     })
   })
 }
 
-MapTiles.prototype.get = function (q, callback) {
+MapTiles.prototype.get = function (q, cb) {
   var quadkey = q.quadkey
   if (!quadkey) {
     assert(typeof q.z === 'number')
@@ -87,23 +96,23 @@ MapTiles.prototype.get = function (q, callback) {
     quadkey = utils.tileToQuadkey([q.x, q.y, q.z])
   }
 
-  this._read(quadkey, callback)
+  this._read(quadkey, cb)
 }
 
-MapTiles.prototype._read = function (quadkey, callback) {
+MapTiles.prototype._read = function (quadkey, cb) {
   var self = this
   self._readFirstIndexOffset(function (err, offset) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     self._readAndParseBlock(offset, MAX_HEADER_SIZE, onParseBlock)
   })
 
   function onParseBlock (err, block, offset) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     if (constants.TILE_BLOCK.equals(block.type)) {
-      return self.storage.read(offset + TILE_HEADER_SIZE, block.length, callback)
+      return self.storage.read(offset + TILE_HEADER_SIZE, block.length, cb)
     }
     if (!constants.INDEX_BLOCK.equals(block.type)) {
-      return callback(new Error('Unexpected block type ' + block.type))
+      return cb(new Error('Unexpected block type ' + block.type))
     }
     // KM: why not just check if there's a parentOffset?
     if (quadkey.length <= block.firstQuadkey.length &&
@@ -112,90 +121,90 @@ MapTiles.prototype._read = function (quadkey, callback) {
         // KM: this should be INDEX_HEADER_SIZE, cause we know it's an INDEX at this point
         return self._readAndParseBlock(block.parentOffset, MAX_HEADER_SIZE, onParseBlock)
       } else {
-        return callback(new Error('NotFound'))
+        return cb(new Error('NotFound'))
       }
     }
     self._readTileOffsetFromIndex(quadkey, block, offset, function (err, nextOffset) {
-      if (err) return callback(err)
-      if (!nextOffset) return callback(new Error('NotFound'))
+      if (err) return cb(err)
+      if (!nextOffset) return cb(new Error('NotFound'))
       // KM: this should be TILE_HEADER_SIZE, cause we know it's a TILE at this point
       self._readAndParseBlock(nextOffset, MAX_HEADER_SIZE, onParseBlock)
     })
   }
 }
 
-MapTiles.prototype._readTileOffsetFromIndex = function (quadkey, block, offset, callback) {
+MapTiles.prototype._readTileOffsetFromIndex = function (quadkey, block, offset, cb) {
   var indexPosition = utils.getIndexPosition(
     quadkey,
     block.firstQuadkey,
     block.depth
   )
   if (typeof indexPosition === 'undefined') {
-    return callback(new Error('NotFound'))
+    return cb(new Error('NotFound'))
   }
   // This is the offset that contains the offset of the tile.
 
-  // TODO: for sparse indexes, the index position should be hashed
-  // so as to not have a bunch of empty blocks
+  // TODO: for sparse indexes, the index position shoudl be managed
+  // to not have a bunch of empty blocks
 
-  var tileOffsetOffset = offset + INDEX_HEADER_SIZE + (indexPosition * block.entryLength)
+  var tileOffsetOffset = offset + INDEX_HEADER_SIZE + (indexPosition * constants.ENTRY_LENGTH)
   this.storage.read(tileOffsetOffset, block.entryLength, function (err, buf) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     var offset = (buf.length === 4)
       ? buf.readUInt32BE(0)
       : uint64be.decode(buf, 0)
-    callback(null, offset)
+    cb(null, offset)
   })
 }
 
-MapTiles.prototype._readFirstIndexOffset = function (callback) {
+MapTiles.prototype._readFirstIndexOffset = function (cb) {
   var self = this
   self._readMetadata(function (err, metadata, metadataOffset) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     var firstBlockOffset = metadataOffset + metadata.length
     self._readAndParseBlock(firstBlockOffset, MAX_HEADER_SIZE, onParseBlock)
   })
 
   function onParseBlock (err, block, offset) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     if (constants.INDEX_BLOCK.equals(block.type)) {
-      return callback(null, offset)
+      return cb(null, offset)
     } else if (!block.length) {
-      return callback(new Error('Could not find Index Block in file'))
+      return cb(new Error('Could not find Index Block in file'))
     }
     var nextOffset = block.length + offset
     self._readAndParseBlock(nextOffset, MAX_HEADER_SIZE, onParseBlock)
   }
 }
 
-MapTiles.prototype._readHeader = function (callback) {
+MapTiles.prototype._readHeader = function (cb) {
   this._readAndParseBlock(0, HEADER_SIZE, function (err, header) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     if (!header.magicNumber || !header.magicNumber.equals(constants.MAGIC_NUMBER)) {
-      return callback(new Error('Unrecognized filetype'))
+      return cb(new Error('Unrecognized filetype'))
     }
-    callback(null, header)
+    cb(null, header)
   })
 }
 
-MapTiles.prototype._readMetadata = function (callback) {
+MapTiles.prototype._readMetadata = function (cb) {
   var self = this
   self._readHeader(function (err, header) {
-    if (err) return callback(err)
-    self._readAndParseBlock(header.metadataOffset, METADATA_SIZE, callback)
+    if (err) return cb(err)
+    self._readAndParseBlock(header.metadataOffset, METADATA_SIZE, cb)
   })
 }
 
-MapTiles.prototype._readAndParseBlock = function (offset, length, callback) {
+MapTiles.prototype._readAndParseBlock = function (offset, length, cb) {
   var self = this
   self.storage.read(offset, length, function (err, buf) {
-    if (err) return callback(err)
+    if (err) return cb(err)
     try {
       var parsed = encoder.parseBlock(buf)
     } catch (e) {
-      return callback(e)
+      return cb(e)
     }
-    callback(null, parsed, offset)
+    cb(null, parsed, offset)
   })
 }
 
