@@ -12,14 +12,10 @@ var METADATA_SIZE = utils.getBlockSize('metadata')
 var TILE_HEADER_SIZE = utils.getBlockSize('tileBlock')
 var INDEX_HEADER_SIZE = utils.getBlockSize('indexBlock')
 var MAX_HEADER_SIZE = Math.max(HEADER_SIZE, METADATA_SIZE, TILE_HEADER_SIZE, INDEX_HEADER_SIZE)
-// KM: what is 8??
-var MIN_FILE_SIZE = HEADER_SIZE + METADATA_SIZE + INDEX_HEADER_SIZE + 8
 
 var defaultHeader = {
   magicNumber: constants.MAGIC_NUMBER,
-  version: '1.0.0',
-  metadataOffset: HEADER_SIZE,
-  firstIndexOffset: HEADER_SIZE + METADATA_SIZE
+  version: 1
 }
 
 var defaultMetadata = {
@@ -28,32 +24,39 @@ var defaultMetadata = {
 
 module.exports = MapTiles
 
-function MapTiles (storage) {
-  if (!(this instanceof MapTiles)) return new MapTiles(storage)
+function MapTiles (storage, metadata) {
+  if (!(this instanceof MapTiles)) return new MapTiles(storage, metadata)
   this.storage = raf(storage)
   this.index = [] // lol memory on writes
   this.lock = mutexify()
   this.openSpaceOffset = 0
+  this.writable = true
   this.maxDepth = 1
+  this._onopen(metadata || {})
 }
 
 MapTiles.prototype.put = function (q, tile, cb) {
+  var self = this
   var quadkey = q.quadkey
   if (!quadkey) {
-    assert(typeof q.z === 'number')
-    assert(typeof q.x === 'number')
-    assert(typeof q.y === 'number')
+    q.z = Number(q.z)
+    q.x = Number(q.x)
+    q.y = Number(q.y)
+    assert(!Number.isNaN(q.z))
+    assert(!Number.isNaN(q.y))
+    assert(!Number.isNaN(q.x))
     quadkey = utils.tileToQuadkey([q.x, q.y, q.z])
   }
   assert(Buffer.isBuffer(tile))
 
-  this.lock(function (release) {
-    this._write(quadkey, tile, cb)
+  self.lock(function (release) {
+    self._write(quadkey, tile, release.bind(null, cb))
   })
 }
 
 MapTiles.prototype.end = function (cb) {
   var self = this
+  self.writable = false
   // write the index header
   var indexHeader = {
     type: constants.INDEX_BLOCK,
@@ -61,49 +64,61 @@ MapTiles.prototype.end = function (cb) {
     depth: self.maxDepth,
     firstQuadkey: self.firstQuadkey
   }
-  this.storage.write(this.openSpaceOffset, encoder.encodeBlock(indexHeader), ondone)
+  this.storage.write(self.openSpaceOffset, encoder.encodeBlock(indexHeader), done)
 
-  function ondone (err) {
+  function done (err) {
     if (err) return cb(err)
     ;(function next (i) {
       if (i >= self.index.length) return cb()
       var item = self.index[i]
-      var offset = this.openSpaceOffset + INDEX_HEADER_SIZE + (item.indexPosition * constants.ENTRY_LENGTH)
-      this.storage.write(offset, item.offset, next)
+      var offset = self.openSpaceOffset + INDEX_HEADER_SIZE + (item.indexPosition * constants.ENTRY_LENGTH)
+      var buf = Buffer.allocUnsafe(4).fill(0)
+      buf.writeUInt32BE(item.offset, 0)
+      self.storage.write(offset, buf, function (err) {
+        if (err) return cb(err)
+        next(i + 1)
+      })
     })(0)
   }
 }
 
 MapTiles.prototype._write = function (quadkey, tile, cb) {
+  var self = this
   // first lets assume there is no index yet...
-  if (!this.firstQuadkey) this.firstQuadkey = quadkey
-  this.maxDepth = Math.max(this.maxDepth, utils.quadkeyToTile(quadkey)[2])
+  if (!self.writable) return cb(new Error('Start a new maptiles instance to write, this one has already been closed.'))
+  if (!self.firstQuadkey) this.firstQuadkey = quadkey
+  self.maxDepth = Math.max(this.maxDepth, utils.quadkeyToTile(quadkey)[2])
   var tileHeader = {
     type: constants.TILE_BLOCK,
     length: tile.length
   }
   var indexPosition = utils.getIndexPosition(quadkey)
   var offset = HEADER_SIZE + METADATA_SIZE + (indexPosition * constants.ENTRY_LENGTH)
-  this.index.push({indexPosition, offset})
+  self.index.push({indexPosition, offset})
   var buf = encoder.encodeBlock(tileHeader)
-  this.storage.write(offset, buf, function (err) {
+  self.storage.write(offset, buf, function (err) {
     if (err) return cb(err)
     var tileOffset = offset + TILE_HEADER_SIZE
-    this.openSpaceOffset = tileOffset + tile.length
-    this.storage.write(tileOffset, tile, cb)
+    self.openSpaceOffset = tileOffset + tile.length
+    self.storage.write(tileOffset, tile, cb)
   })
 }
 
-MapTiles.prototype.createFile = function (file, offsetBytes, cb) {
-  var header = Object.assign({}, defaultHeader, {
-    offsetBytes: offsetBytes
+MapTiles.prototype._onopen = function (metadata) {
+  var self = this
+  var buf = Buffer.allocUnsafe(HEADER_SIZE + METADATA_SIZE).fill(0)
+  var headerBuf = encoder.encodeBlock(Object.assign({}, defaultHeader, {
+    metadataOffset: HEADER_SIZE
+  }))
+  headerBuf.copy(buf, 0, HEADER_SIZE)
+  var metadataBuf = encoder.encodeBlock(Object.assign({}, metadata, {
+    type: constants.METADATA_BLOCK,
+    length: METADATA_SIZE
+  }))
+  metadataBuf.copy(buf, HEADER_SIZE, buf.length)
+  self.lock(function (release) {
+    self.storage.write(0, buf, release)
   })
-  var headerBuf = encoder.encodeBlock(header)
-  var buf = Buffer.allocUnsafe(MIN_FILE_SIZE).fill(0)
-  headerBuf.copy(buf)
-  constants.METADATA_BLOCK.copy(buf, defaultHeader.metadataOffset)
-  constants.INDEX_BLOCK.copy(buf, defaultHeader.firstIndexOffset)
-  this.storage.write(0, buf, cb)
 }
 
 MapTiles.prototype._writeMetadata = function (metadata, cb) {
@@ -122,9 +137,12 @@ MapTiles.prototype._writeMetadata = function (metadata, cb) {
 MapTiles.prototype.get = function (q, cb) {
   var quadkey = q.quadkey
   if (!quadkey) {
-    assert(typeof q.z === 'number')
-    assert(typeof q.x === 'number')
-    assert(typeof q.y === 'number')
+    q.z = Number(q.z)
+    q.x = Number(q.x)
+    q.y = Number(q.y)
+    assert(!Number.isNaN(q.z))
+    assert(!Number.isNaN(q.y))
+    assert(!Number.isNaN(q.x))
     quadkey = utils.tileToQuadkey([q.x, q.y, q.z])
   }
 
@@ -184,7 +202,7 @@ MapTiles.prototype._readTileOffsetFromIndex = function (quadkey, block, offset, 
     if (err) return cb(err)
     var offset = (buf.length === 4)
       ? buf.readUInt32BE(0)
-      : uint64be.decode(buf, 0)
+      : uint64be.decode(buf, 32)
     cb(null, offset)
   })
 }

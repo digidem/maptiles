@@ -1,19 +1,29 @@
+var rimraf = require('rimraf')
 var fs = require('fs')
 var cousteau = require('cousteau')
 var maptiles = require('..')
 var test = require('tape')
 var path = require('path')
 
+var pathname = path.join(__dirname, 'testdb.maptiles')
+
 test('write and read a simple maptiles format', function (t) {
-  var pathname = path.join(__dirname, 'testdb.maptiles')
   var mt = maptiles(pathname)
   var sourcepath = path.join(__dirname, 'data', 'mini')
   cousteau(sourcepath, function (err, result) {
     t.notOk(err.length)
-    putTiles(mt, result, function (err) {
+    putTiles(mt, result.files, function (err) {
       t.error(err)
+      mt.end(function (err) {
+        t.error(err)
+        t.end()
+      })
     })
   })
+})
+
+test('cleanup', function (t) {
+  rimraf(pathname, t.end)
 })
 
 function putTiles (mt, tilepaths, done) {

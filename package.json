@@ -33,6 +33,7 @@
     "uint64be": "^2.0.2"
   },
   "devDependencies": {
-    "cousteau": "^1.0.14"
+    "cousteau": "^1.0.14",
+    "rimraf": "^2.6.2"
   }
 }
