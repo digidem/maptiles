@@ -14,5 +14,8 @@ test('getIndexPosition', function (t) {
   pos = utils.getIndexPosition('02', '0', 3)
   t.same(pos, 3)
 
+  pos = utils.getIndexPosition('2')
+  console.log(pos)
+
   t.end()
 })

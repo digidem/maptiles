@@ -25,6 +25,7 @@
   "homepage": "https://github.com/digidem/maptiles#readme",
   "dependencies": {
     "assert": "^1.4.1",
+    "debug": "^3.1.0",
     "maptiles-spec": "github:digidem/maptiles-spec",
     "mutexify": "^1.2.0",
     "random-access-file": "^2.0.1",

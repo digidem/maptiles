@@ -1,3 +1,4 @@
+var utils = require('../lib/utils')
 var rimraf = require('rimraf')
 var fs = require('fs')
 var cousteau = require('cousteau')
@@ -6,9 +7,9 @@ var test = require('tape')
 var path = require('path')
 
 var pathname = path.join(__dirname, 'testdb.maptiles')
+var mt = maptiles(pathname)
 
 test('write and read a simple maptiles format', function (t) {
-  var mt = maptiles(pathname)
   var sourcepath = path.join(__dirname, 'data', 'mini')
   cousteau(sourcepath, function (err, result) {
     t.notOk(err.length)
@@ -16,7 +17,9 @@ test('write and read a simple maptiles format', function (t) {
       t.error(err)
       mt.end(function (err) {
         t.error(err)
-        t.end()
+        check(t, ['0', '1', '2', '3'], function () {
+          t.end()
+        })
       })
     })
   })
@@ -37,12 +40,28 @@ function putTiles (mt, tilepaths, done) {
       x: parts[parts.length - 2],
       y: parts[parts.length - 1].split('.')[0]
     }
+    console.log('put', stat.path, q)
     fs.readFile(stat.path, function (err, buf) {
       if (err) return done(err)
       mt.put(q, buf, function (err) {
         if (err) return done(err)
         next(i + 1)
       })
+    })
+  })(0)
+}
+
+function check (t, quadkeys, cb) {
+  ;(function next (i) {
+    if (i >= quadkeys.length) return cb()
+    var q = quadkeys[i]
+    mt.get({q}, function (err, tile) {
+      t.error(err)
+      var xyz = utils.quadkeyToTile(q).map(function (n) { return n.toString() })
+      console.log('reading', q, xyz)
+      var buf = fs.readFileSync(path.join(__dirname, 'data', 'mini', xyz[2], xyz[1], xyz[0] + '.jpeg'))
+      t.ok(buf.equals(tile))
+      next(i + 1)
     })
   })(0)
 }
