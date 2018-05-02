@@ -1,0 +1,31 @@
+{
+  "name": "maptiles",
+  "version": "1.0.0",
+  "description": " Simple library for writing and reading the maptiles format. ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/digidem/maptiles.git"
+  },
+  "keywords": [
+    "maptiles",
+    "map",
+    "tiles",
+    "compressed",
+    "format"
+  ],
+  "author": "Digital Democracy",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/digidem/maptiles/issues"
+  },
+  "homepage": "https://github.com/digidem/maptiles#readme",
+  "dependencies": {
+    "maptiles-spec": "github:digidem/maptiles-spec",
+    "tap": "^11.1.4",
+    "tape": "^4.9.0"
+  }
+}
