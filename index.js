@@ -101,7 +101,7 @@ MapTiles.prototype._read = function (quadkey, callback) {
   function onParseBlock (err, block, offset) {
     if (err) return callback(err)
     if (constants.TILE_BLOCK.equals(block.type)) {
-      return self.storage.read(offset + TILE_DATA_OFFSET, block.length, callback)
+      return self.storage.read(offset + TILE_HEADER_SIZE, block.length, callback)
     }
     if (!constants.INDEX_BLOCK.equals(block.type)) {
       return callback(new Error('Unexpected block type ' + block.type))
