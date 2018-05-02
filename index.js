@@ -54,7 +54,7 @@ MapTiles.prototype._write = function (quadkey, tile, callback) {
   // TODO
 }
 
-MapTiles.prototype._createFile = function (file, offsetBytes, callback) {
+MapTiles.prototype.createFile = function (file, offsetBytes, callback) {
   var header = Object.assign({}, defaultHeader, {
     offsetBytes: offsetBytes
   })
@@ -63,7 +63,7 @@ MapTiles.prototype._createFile = function (file, offsetBytes, callback) {
   headerBuf.copy(buf)
   constants.METADATA_BLOCK.copy(buf, defaultHeader.metadataOffset)
   constants.INDEX_BLOCK.copy(buf, defaultHeader.firstIndexOffset)
-  file.write(0, buf, callback)
+  this.storage.write(0, buf, callback)
 }
 
 MapTiles.prototype._writeMetadata = function (metadata, callback) {
