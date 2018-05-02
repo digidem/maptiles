@@ -24,8 +24,15 @@
   },
   "homepage": "https://github.com/digidem/maptiles#readme",
   "dependencies": {
+    "assert": "^1.4.1",
     "maptiles-spec": "github:digidem/maptiles-spec",
+    "mutexify": "^1.2.0",
+    "random-access-file": "^2.0.1",
     "tap": "^11.1.4",
-    "tape": "^4.9.0"
+    "tape": "^4.9.0",
+    "uint64be": "^2.0.2"
+  },
+  "devDependencies": {
+    "cousteau": "^1.0.14"
   }
 }
