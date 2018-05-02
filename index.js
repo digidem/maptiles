@@ -2,7 +2,6 @@ var uint64be = require('uint64be')
 var assert = require('assert')
 var mutexify = require('mutexify')
 var raf = require('random-access-file')
-var defs = require('maptiles-spec').structure
 var constants = require('maptiles-spec').constants
 
 var utils = require('./lib/utils')
@@ -93,9 +92,9 @@ MapTiles.prototype.get = function (q, callback) {
 
 MapTiles.prototype._read = function (quadkey, callback) {
   var self = this
-  self._readFirstIndexOffset(function (err, indexOffset) {
+  self._readFirstIndexOffset(function (err, offset) {
     if (err) return callback(err)
-    self._readAndParseBlock(indexOffset, MAX_HEADER_SIZE, onParseBlock)
+    self._readAndParseBlock(offset, MAX_HEADER_SIZE, onParseBlock)
   })
 
   function onParseBlock (err, block, offset) {
@@ -122,20 +121,20 @@ MapTiles.prototype._read = function (quadkey, callback) {
   }
 }
 
-MapTiles.prototype._readTileOffsetFromIndex = function (quadkey, indexInfo, indexOffset, callback) {
+MapTiles.prototype._readTileOffsetFromIndex = function (quadkey, block, offset, callback) {
   var indexPosition = utils.getIndexPosition(
     quadkey,
-    indexInfo.firstTileQuadkey,
-    indexInfo.depth
+    block.firstQuadkey,
+    block.depth
   )
   if (typeof indexPosition === 'undefined') {
     return callback(new Error('NotFound'))
   }
   // This is the offset in the file of a 4 or 8 byte buffer in the index that
   // contains the offset of the tile.
-  var tileOffsetOffset = indexOffset + INDEX_HEADER_SIZE +
-    (indexPosition * indexInfo.entryLength)
-  this.storage.read(tileOffsetOffset, indexInfo.entryLength, function (err, buf) {
+  var tileOffsetOffset = offset + INDEX_HEADER_SIZE +
+    (indexPosition * block.entryLength)
+  this.storage.read(tileOffsetOffset, block.entryLength, function (err, buf) {
     if (err) return callback(err)
     var offset = (buf.length === 4)
       ? buf.readUInt32BE(0)
@@ -149,7 +148,7 @@ MapTiles.prototype._readFirstIndexOffset = function (callback) {
   self._readMetadata(function (err, metadata, metadataOffset) {
     if (err) return callback(err)
     var firstBlockOffset = metadataOffset + metadata.length
-    self._readAndParseBlock(firstBlockOffset, 5, onParseBlock)
+    self._readAndParseBlock(firstBlockOffset, MAX_HEADER_SIZE, onParseBlock)
   })
 
   function onParseBlock (err, block, offset) {
@@ -159,7 +158,8 @@ MapTiles.prototype._readFirstIndexOffset = function (callback) {
     } else if (!block.length) {
       return callback(new Error('Could not find Index Block in file'))
     }
-    self._readAndParseBlock(offset, 5, onParseBlock)
+    var nextOffset = block.length + offset
+    self._readAndParseBlock(nextOffset, MAX_HEADER_SIZE, onParseBlock)
   }
 }
 
