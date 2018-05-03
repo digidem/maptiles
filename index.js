@@ -1,7 +1,6 @@
 var debug = require('debug')('maptiles')
 var uint64be = require('uint64be')
 var assert = require('assert')
-var mutexify = require('mutexify')
 var raf = require('random-access-file')
 var constants = require('maptiles-spec').constants
 
@@ -189,11 +188,7 @@ MapTiles.prototype._getTileOffset = function (quadkey, cb) {
   var self = this
   self._readIndex(function (err, indexHeader, indexOffset) {
     if (err) return cb(err)
-    var indexPosition = utils.getIndexPosition(
-      quadkey,
-      indexHeader.firstQuadkey,
-      indexHeader.depth
-    )
+    var indexPosition = utils.getIndexPosition(quadkey)
     debug('reading tile offset', indexPosition, indexOffset)
     if (typeof indexPosition === 'undefined') {
       return cb(new Error('Could not find tile.'))
