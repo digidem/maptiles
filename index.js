@@ -1,3 +1,4 @@
+var fs = require('fs')
 var debug = require('debug')('maptiles')
 var uint64be = require('uint64be')
 var assert = require('assert')
@@ -23,14 +24,19 @@ var defaultMetadata = {
 
 module.exports = MapTiles
 
-function MapTiles (storage, metadata) {
-  if (!(this instanceof MapTiles)) return new MapTiles(storage, metadata)
-  this.storage = raf(storage)
+function MapTiles (filename, metadata) {
+  if (!(this instanceof MapTiles)) return new MapTiles(filename, metadata)
+  this.filename = filename
+  this.storage = raf(filename)
   this.index = [] // lol memory on writes
   this.openSpaceOffset = 0
   this.writable = true
   this.maxDepth = 1
   this.metadata = metadata
+}
+
+MapTiles.prototype._length = function () {
+  return fs.statSync(this.filename).size
 }
 
 MapTiles.prototype.put = function (q, tile, cb) {
@@ -58,31 +64,29 @@ MapTiles.prototype.end = function (cb) {
     type: constants.INDEX_BLOCK,
     entryLength: constants.ENTRY_LENGTH,
     depth: self.maxDepth,
-    firstQuadkey: self.firstQuadkey
+    firstQuadkey: self.firstQuadkey,
+    count: self.index.length
   })
 
   function done (err) {
     if (err) return cb(err)
-    self._writeHeaderAndMetadata(cb)
+    var offset = self.openSpaceOffset + (self.index.length * constants.ENTRY_LENGTH)
+    debug('writing index header', offset, indexHeader)
+    self.storage.write(offset, indexHeader, cb)
   }
 
-  this.storage.write(self.openSpaceOffset, indexHeader, writeIndex)
-
-  function writeIndex (err) {
-    if (err) return done(err)
-    ;(function next (i) {
-      if (i >= self.index.length) return done()
-      var item = self.index[i]
-      var offset = self.openSpaceOffset + INDEX_HEADER_SIZE + (item.indexPosition * constants.ENTRY_LENGTH)
-      var buf = Buffer.allocUnsafe(4).fill(0)
-      buf.writeUInt32BE(item.offset, 0)
-      debug('writing index', item.indexPosition, offset, item.offset)
-      self.storage.write(offset, buf, function (err) {
-        if (err) return done(err)
-        next(i + 1)
-      })
-    })(0)
-  }
+  ;(function next (i) {
+    if (i >= self.index.length) return done()
+    var item = self.index[i]
+    var offset = self.openSpaceOffset + (item.indexPosition * constants.ENTRY_LENGTH)
+    var buf = Buffer.allocUnsafe(4).fill(0)
+    buf.writeUInt32BE(item.offset, 0)
+    debug('writing index', item.indexPosition, offset, item.offset)
+    self.storage.write(offset, buf, function (err) {
+      if (err) return done(err)
+      next(i + 1)
+    })
+  })(0)
 }
 
 MapTiles.prototype._write = function (quadkey, tile, cb) {
@@ -155,16 +159,15 @@ MapTiles.prototype.get = function (q, cb) {
 
 MapTiles.prototype._readIndex = function (cb) {
   var self = this
-  self._readHeader(function (err, header) {
+  var length = this._length()
+  var indexOffset = length - INDEX_HEADER_SIZE
+  console.log('reading inderx', indexOffset, INDEX_HEADER_SIZE)
+  self._readAndParseBlock(indexOffset, INDEX_HEADER_SIZE, function (err, indexHeader) {
     if (err) return cb(err)
-    debug('reading index')
-    self._readAndParseBlock(header.indexOffset, INDEX_HEADER_SIZE, function (err, indexHeader) {
-      if (err) return cb(err)
-      if (!constants.INDEX_BLOCK.equals(indexHeader.type)) {
-        return cb(new Error('Unexpected block type ' + indexHeader.type))
-      }
-      return cb(null, indexHeader, header.indexOffset)
-    })
+    if (!constants.INDEX_BLOCK.equals(indexHeader.type)) {
+      return cb(new Error('Unexpected block type ' + indexHeader.type))
+    }
+    return cb(null, indexHeader)
   })
 }
 
@@ -186,19 +189,20 @@ MapTiles.prototype._read = function (quadkey, cb) {
 
 MapTiles.prototype._getTileOffset = function (quadkey, cb) {
   var self = this
-  self._readIndex(function (err, indexHeader, indexOffset) {
+  self._readIndex(function (err, index) {
     if (err) return cb(err)
     var indexPosition = utils.getIndexPosition(quadkey)
-    debug('reading tile offset', indexPosition, indexOffset)
+    var indexStart = self.length - (index.count * index.entryLength)
+    debug('reading tile offset', indexPosition, indexStart)
     if (typeof indexPosition === 'undefined') {
       return cb(new Error('Could not find tile.'))
     }
     // This is the offset that contains the offset of the tile.
     // TODO: for sparse indexes, the index position should be managed
     // to not have a bunch of empty blocks
-    var tileOffsetOffset = indexOffset + INDEX_HEADER_SIZE + (indexPosition * constants.ENTRY_LENGTH)
+    var tileOffsetOffset = indexStart + (indexPosition * index.entryLength)
     debug('reading tile offsetoffset', tileOffsetOffset)
-    self.storage.read(tileOffsetOffset, indexHeader.entryLength, function (err, buf) {
+    self.storage.read(tileOffsetOffset, index.entryLength, function (err, buf) {
       if (err) return cb(err)
       var offset = (buf.length === 4) ? buf.readUInt32BE(0) : uint64be.decode(buf, 0)
       debug('got offset', offset)
