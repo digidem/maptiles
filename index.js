@@ -29,7 +29,8 @@ function MapTiles (filename, metadata) {
   this.filename = filename
   this.storage = raf(filename)
   this.index = [] // lol memory on writes
-  this.openSpaceOffset = 0
+  this.maxIndexOffset = 0
+  this.maxDataOffset = 0
   this.writable = true
   this.maxDepth = 1
   this.metadata = metadata
@@ -61,28 +62,33 @@ MapTiles.prototype.end = function (cb) {
   var self = this
   self.writable = false
   // write the index header
-  var indexHeader = encoder.encodeBlock({
+  var indexHeader = {
     type: constants.INDEX_BLOCK,
     entryLength: constants.ENTRY_LENGTH,
     depth: self.maxDepth,
     firstQuadkey: self.firstQuadkey,
+    start: self.maxDataOffset,
     count: self.index.length
-  })
+  }
 
   function done (err) {
     if (err) return cb(err)
-    var offset = self.openSpaceOffset + (self.index.length * constants.ENTRY_LENGTH)
-    debug('writing index header', offset, indexHeader)
-    self.storage.write(offset, indexHeader, cb)
+    // TODO: only take up as much space as there are indexes
+    // offset = self.maxDataOffset + (self.index.length * constants.ENTRY_LENGTH)
+    var indexHeaderOffset = self.maxIndexOffset + constants.ENTRY_LENGTH
+    debug('writing index header', indexHeaderOffset, indexHeader)
+    self.storage.write(indexHeaderOffset, encoder.encodeBlock(indexHeader), cb)
   }
 
   ;(function next (i) {
     if (i >= self.index.length) return done()
     var item = self.index[i]
-    var offset = self.openSpaceOffset + (item.indexPosition * constants.ENTRY_LENGTH)
+    var offset = self.maxDataOffset + (item.indexPosition * constants.ENTRY_LENGTH)
     var buf = Buffer.allocUnsafe(4).fill(0)
     buf.writeUInt32BE(item.offset, 0)
     debug('writing index', item.indexPosition, offset, item.offset)
+    self.maxIndexOffset = Math.max(offset, self.maxIndexOffset)
+    debug('maxIndexOffset', self.maxIndexOffset)
     self.storage.write(offset, buf, function (err) {
       if (err) return done(err)
       next(i + 1)
@@ -103,14 +109,14 @@ MapTiles.prototype._write = function (quadkey, tile, cb) {
   debug('quadkey', quadkey)
   var indexPosition = utils.getIndexPosition(quadkey)
   debug('index', indexPosition)
-  var offset = HEADER_SIZE + METADATA_SIZE + self.openSpaceOffset
+  var offset = HEADER_SIZE + METADATA_SIZE + self.maxDataOffset
   self.index.push({indexPosition, offset})
   var buf = encoder.encodeBlock(tileHeader)
   debug('writing header at offset', offset, buf.length)
   self.storage.write(offset, buf, function (err) {
     if (err) return cb(err)
     var tileOffset = offset + TILE_HEADER_SIZE
-    self.openSpaceOffset = tileOffset + tile.length
+    self.maxDataOffset = tileOffset + tile.length
     console.log('writing tile', tileOffset, tile.length)
     self.storage.write(tileOffset, tile, cb)
   })
@@ -120,8 +126,7 @@ MapTiles.prototype._writeHeaderAndMetadata = function (cb) {
   var self = this
   var buf = Buffer.allocUnsafe(HEADER_SIZE + METADATA_SIZE).fill(0)
   var headerBuf = encoder.encodeBlock(Object.assign({}, defaultHeader, {
-    metadataOffset: HEADER_SIZE,
-    indexOffset: self.openSpaceOffset
+    metadataOffset: HEADER_SIZE
   }))
   headerBuf.copy(buf, 0)
   var metadataBuf = encoder.encodeBlock(Object.assign({}, self.metadata, {
@@ -176,7 +181,7 @@ MapTiles.prototype._read = function (quadkey, cb) {
   var self = this
   self._getTileOffset(quadkey, function (err, tileOffset) {
     if (err) return cb(err)
-    debug('reading next', tileOffset)
+    debug('reading tileOffset', tileOffset)
     self._readAndParseBlock(tileOffset, TILE_HEADER_SIZE, function (err, block) {
       if (err) return cb(err)
       if (constants.TILE_BLOCK.equals(block.type)) {
@@ -199,9 +204,8 @@ MapTiles.prototype._getTileOffset = function (quadkey, cb) {
     // This is the offset that contains the offset of the tile.
     // TODO: for sparse indexes, the index position should be managed
     // to not have a bunch of empty blocks
-    var indexStart = self.length - INDEX_HEADER_SIZE - (index.count * index.entryLength)
-    debug('reading tile offset', indexPosition, index.entryLength, indexStart)
-    var tileOffsetOffset = indexStart + (indexPosition * index.entryLength)
+    debug('reading tile offset', indexPosition, index.entryLength, index.start)
+    var tileOffsetOffset = index.start + (indexPosition * index.entryLength)
     debug('reading tile offsetoffset', tileOffsetOffset)
     self.storage.read(tileOffsetOffset, index.entryLength, function (err, buf) {
       if (err) return cb(err)
