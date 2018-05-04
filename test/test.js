@@ -59,7 +59,7 @@ function check (t, quadkeys, cb) {
       t.error(err)
       var xyz = utils.quadkeyToTile(q).map(function (n) { return n.toString() })
       console.log('checking', 'q=', q, 'xyz=', xyz)
-      var buf = fs.readFileSync(path.join(__dirname, 'data', 'mini', xyz[2], xyz[1], xyz[0] + '.jpeg'))
+      var buf = fs.readFileSync(path.join(__dirname, 'data', 'mini', xyz[2], xyz[0], xyz[1] + '.jpeg'))
       t.ok(buf.equals(tile))
       next(i + 1)
     })

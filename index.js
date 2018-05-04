@@ -36,12 +36,13 @@ function MapTiles (filename, metadata) {
 }
 
 MapTiles.prototype._length = function () {
-  return fs.statSync(this.filename).size
+  this.length = fs.statSync(this.filename).size
 }
 
 MapTiles.prototype.put = function (q, tile, cb) {
   var self = this
   var quadkey = q.quadkey
+  debug('putting', q)
   if (!quadkey) {
     q.z = Number(q.z)
     q.x = Number(q.x)
@@ -49,7 +50,7 @@ MapTiles.prototype.put = function (q, tile, cb) {
     assert(!Number.isNaN(q.z))
     assert(!Number.isNaN(q.y))
     assert(!Number.isNaN(q.x))
-    quadkey = utils.tileToQuadkey([q.x, q.y, q.z])
+    quadkey = utils.tileToQuadkey({x: q.x, y: q.y}, q.z)
   }
   assert(Buffer.isBuffer(tile))
 
@@ -159,9 +160,9 @@ MapTiles.prototype.get = function (q, cb) {
 
 MapTiles.prototype._readIndex = function (cb) {
   var self = this
-  var length = this._length()
-  var indexOffset = length - INDEX_HEADER_SIZE
-  console.log('reading inderx', indexOffset, INDEX_HEADER_SIZE)
+  self._length()
+  var indexOffset = self.length - INDEX_HEADER_SIZE
+  console.log('reading index', indexOffset, INDEX_HEADER_SIZE)
   self._readAndParseBlock(indexOffset, INDEX_HEADER_SIZE, function (err, indexHeader) {
     if (err) return cb(err)
     if (!constants.INDEX_BLOCK.equals(indexHeader.type)) {
@@ -192,14 +193,14 @@ MapTiles.prototype._getTileOffset = function (quadkey, cb) {
   self._readIndex(function (err, index) {
     if (err) return cb(err)
     var indexPosition = utils.getIndexPosition(quadkey)
-    var indexStart = self.length - (index.count * index.entryLength)
-    debug('reading tile offset', indexPosition, indexStart)
     if (typeof indexPosition === 'undefined') {
       return cb(new Error('Could not find tile.'))
     }
     // This is the offset that contains the offset of the tile.
     // TODO: for sparse indexes, the index position should be managed
     // to not have a bunch of empty blocks
+    var indexStart = self.length - INDEX_HEADER_SIZE - (index.count * index.entryLength)
+    debug('reading tile offset', indexPosition, index.entryLength, indexStart)
     var tileOffsetOffset = indexStart + (indexPosition * index.entryLength)
     debug('reading tile offsetoffset', tileOffsetOffset)
     self.storage.read(tileOffsetOffset, index.entryLength, function (err, buf) {
