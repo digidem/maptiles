@@ -138,16 +138,6 @@ MapTiles.prototype._writeHeaderAndMetadata = function (cb) {
   self.storage.write(0, buf, cb)
 }
 
-MapTiles.prototype._writeMetadata = function (metadata, cb) {
-  var self = this
-  self._readMetadata(function (err, existingMetadata) {
-    if (err) return cb(err)
-    var merged = Object.assign({}, defaultMetadata, existingMetadata, metadata)
-    var buf = encoder.encodeBlock(merged)
-    self.storage.write(0 + HEADER_SIZE, buf, cb)
-  })
-}
-
 MapTiles.prototype.get = function (q, cb) {
   var quadkey = q.quadkey || q.q
   if (!quadkey) {
