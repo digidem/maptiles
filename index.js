@@ -108,7 +108,7 @@ MapTiles.prototype._write = function (quadkey, tile, cb) {
     length: tile.length
   }
   debug('quadkey', quadkey)
-  var indexPosition = utils.getIndexPosition(quadkey)
+  var indexPosition = utils.getIndexPosition(quadkey, self.firstQuadkey)
   debug('index', indexPosition)
   var offset = HEADER_SIZE + METADATA_SIZE + self.maxDataOffset
   self.index.push({indexPosition, offset})
@@ -188,7 +188,7 @@ MapTiles.prototype._getTileOffset = function (quadkey, cb) {
   var self = this
   self._readIndex(function (err, index) {
     if (err) return cb(err)
-    var indexPosition = utils.getIndexPosition(quadkey)
+    var indexPosition = utils.getIndexPosition(quadkey, index.firstQuadKey, index.maxDepth)
     if (typeof indexPosition === 'undefined') {
       return cb(new Error('Could not find tile.'))
     }
