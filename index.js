@@ -61,25 +61,26 @@ MapTiles.prototype.put = function (q, tile, cb) {
 MapTiles.prototype.end = function (cb) {
   var self = this
   self.writable = false
-  // write the index header
-  var indexHeader = {
-    type: constants.INDEX_BLOCK,
-    entryLength: constants.ENTRY_LENGTH,
-    depth: self.maxDepth,
-    firstQuadkey: self.firstQuadkey,
-    start: self.maxDataOffset,
-    count: self.index.length
-  }
 
   function done (err) {
     if (err) return cb(err)
+    // write the index header
+    var indexHeader = {
+      type: constants.INDEX_BLOCK,
+      entryLength: constants.ENTRY_LENGTH,
+      depth: self.maxDepth,
+      firstQuadkey: self.firstQuadkey,
+      start: self.maxDataOffset,
+      count: self.index.length
+    }
     // TODO: only take up as much space as there are indexes
     // offset = self.maxDataOffset + (self.index.length * constants.ENTRY_LENGTH)
     var indexHeaderOffset = self.maxIndexOffset + constants.ENTRY_LENGTH
     debug('writing index header', indexHeaderOffset, indexHeader)
     self.storage.write(indexHeaderOffset, encoder.encodeBlock(indexHeader), cb)
   }
-
+  
+  // write the index
   ;(function next (i) {
     if (i >= self.index.length) return done()
     var item = self.index[i]
